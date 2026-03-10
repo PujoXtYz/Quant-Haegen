@@ -1,0 +1,114 @@
+openapi: 3.1.0
+info:
+  title: Bybit Middleware API
+  description: Connect Custom GPT to Bybit private account data
+  version: 1.0.0
+servers:
+  - url: https://YOUR-APP-NAME.railway.app
+    description: Middleware server (ganti dengan URL Railway kamu)
+
+paths:
+  /ticker:
+    get:
+      operationId: getTicker
+      summary: Get market price for a symbol (public)
+      parameters:
+        - name: category
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [spot, linear, inverse]
+          description: "spot = crypto spot, linear = futures USDT"
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+          description: "Contoh: BTCUSDT, ETHUSDT"
+      responses:
+        "200":
+          description: Market ticker data
+
+  /wallet-balance:
+    get:
+      operationId: getWalletBalance
+      summary: Get wallet/account balance
+      parameters:
+        - name: accountType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [UNIFIED, CONTRACT, SPOT]
+            default: UNIFIED
+      responses:
+        "200":
+          description: Wallet balance data
+
+  /positions:
+    get:
+      operationId: getPositions
+      summary: Get open positions
+      parameters:
+        - name: category
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [linear, inverse]
+        - name: symbol
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter by symbol, contoh: BTCUSDT"
+      responses:
+        "200":
+          description: Position list
+
+  /open-orders:
+    get:
+      operationId: getOpenOrders
+      summary: Get currently open orders
+      parameters:
+        - name: category
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [spot, linear, inverse]
+        - name: symbol
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Open orders list
+
+  /order-history:
+    get:
+      operationId: getOrderHistory
+      summary: Get order history
+      parameters:
+        - name: category
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [spot, linear, inverse]
+        - name: symbol
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Jumlah order yang ditampilkan, max 50"
+      responses:
+        "200":
+          description: Order history list
