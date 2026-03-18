@@ -165,8 +165,71 @@ async function executeTool(name, args) {
   }
 }
 
-// ── MCP SSE TRANSPORT ────────────────────────────────────────
-// Implements MCP 2024-11-05 SSE protocol manually (no SDK needed)
+// ── CORS PREFLIGHT ───────────────────────────────────────────
+app.options("*", (req, res) => {
+  res.writeHead(204, {
+    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key",
+  });
+  res.end();
+});
+
+// ── MCP STREAMABLE HTTP (Claude Cowork / new MCP spec) ───────
+// POST /mcp — handles all JSON-RPC in a single endpoint
+// Responds as plain JSON or SSE depending on Accept header
+
+app.post("/mcp", async (req, res) => {
+  const msg = req.body;
+  const wantsSSE = (req.headers.accept || "").includes("text/event-stream");
+
+  let result, isError = false;
+
+  if (msg.method === "initialize") {
+    result = {
+      protocolVersion: "2024-11-05",
+      capabilities:   { tools: {} },
+      serverInfo:     { name: "bybit-quant-haegen", version: "2.0.0" },
+    };
+  } else if (msg.method === "notifications/initialized" || msg.method === "ping") {
+    // No response body for notifications
+    return res.status(204).end();
+  } else if (msg.method === "tools/list") {
+    result = { tools: MCP_TOOLS };
+  } else if (msg.method === "tools/call") {
+    const { name, arguments: args } = msg.params || {};
+    result = await executeTool(name, args);
+  } else {
+    const errResponse = {
+      jsonrpc: "2.0",
+      id: msg.id ?? null,
+      error: { code: -32601, message: `Method not found: ${msg.method}` },
+    };
+    if (wantsSSE) {
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Access-Control-Allow-Origin": "*" });
+      res.write(`event: message\ndata: ${JSON.stringify(errResponse)}\n\n`);
+      return res.end();
+    }
+    return res.status(200).json(errResponse);
+  }
+
+  const response = { jsonrpc: "2.0", id: msg.id ?? null, result };
+
+  if (wantsSSE) {
+    res.writeHead(200, {
+      "Content-Type":                "text/event-stream",
+      "Cache-Control":               "no-cache",
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.write(`event: message\ndata: ${JSON.stringify(response)}\n\n`);
+    return res.end();
+  }
+
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  return res.status(200).json(response);
+});
+
+// ── MCP SSE TRANSPORT (legacy / fallback) ────────────────────
 // GET  /sse      → Claude connects, gets sessionId
 // POST /messages → Claude sends JSON-RPC tool calls
 
@@ -279,59 +342,20 @@ app.get("/order-history", restAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Health check
+// Health check + MCP discovery
 app.get("/", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.json({
-    status:       "ok",
-    version:      "2.0.0",
-    mcp_endpoint: "/sse",
-    tools:        MCP_TOOLS.map((t) => t.name),
+    status:               "ok",
+    version:              "2.0.0",
+    mcp_streamable:       "/mcp",
+    mcp_sse_legacy:       "/sse",
+    tools:                MCP_TOOLS.map((t) => t.name),
   });
 });
 
 // ── START ────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-// Streamable HTTP transport — untuk Claude.ai web connectors
-app.post("/mcp", async (req, res) => {
-  const msg = req.body;
-  let reply;
-
-  if (msg.method === "initialize") {
-    reply = {
-      jsonrpc: "2.0",
-      id: msg.id,
-      result: {
-        protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "bybit-quant-haegen", version: "2.0.0" },
-      },
-    };
-  } else if (msg.method === "tools/list") {
-    reply = {
-      jsonrpc: "2.0",
-      id: msg.id,
-      result: { tools: MCP_TOOLS },
-    };
-  } else if (msg.method === "tools/call") {
-    const { name, arguments: args } = msg.params;
-    const toolResult = await executeTool(name, args);
-    reply = { jsonrpc: "2.0", id: msg.id, result: toolResult };
-  } else if (msg.method === "notifications/initialized") {
-    return res.status(202).send();
-  } else {
-    reply = {
-      jsonrpc: "2.0",
-      id: msg.id,
-      error: { code: -32601, message: `Method not found: ${msg.method}` },
-    };
-  }
-
-  res.json(reply);
-});
-```
-
----
-
-Setelah push, connect di claude.ai pake:
-```
-https://quant-haegen-production.up.railway.app/mcp
+app.listen(PORT, () =>
+  console.log(`Bybit MCP + REST Middleware v2.0 running on port ${PORT}`)
+);
