@@ -291,6 +291,47 @@ app.get("/", (req, res) => {
 
 // ── START ────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`Bybit MCP + REST Middleware v2.0 running on port ${PORT}`)
-);
+// Streamable HTTP transport — untuk Claude.ai web connectors
+app.post("/mcp", async (req, res) => {
+  const msg = req.body;
+  let reply;
+
+  if (msg.method === "initialize") {
+    reply = {
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "bybit-quant-haegen", version: "2.0.0" },
+      },
+    };
+  } else if (msg.method === "tools/list") {
+    reply = {
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: { tools: MCP_TOOLS },
+    };
+  } else if (msg.method === "tools/call") {
+    const { name, arguments: args } = msg.params;
+    const toolResult = await executeTool(name, args);
+    reply = { jsonrpc: "2.0", id: msg.id, result: toolResult };
+  } else if (msg.method === "notifications/initialized") {
+    return res.status(202).send();
+  } else {
+    reply = {
+      jsonrpc: "2.0",
+      id: msg.id,
+      error: { code: -32601, message: `Method not found: ${msg.method}` },
+    };
+  }
+
+  res.json(reply);
+});
+```
+
+---
+
+Setelah push, connect di claude.ai pake:
+```
+https://quant-haegen-production.up.railway.app/mcp
